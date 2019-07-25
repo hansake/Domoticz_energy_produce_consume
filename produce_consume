@@ -1,0 +1,72 @@
+-- Calculate and show difference between produced and consumed energy today
+--
+-- The produced energy is measured by the SolarEdge solar cell inverter
+--   the counter "counterToday" is read (device is called "SolarEdge kWh" here)
+-- The consumed energy is measured by the electrical meter for total consumption
+--   the counter "counterToday" is read (device is called "Elmätare total" here)
+--
+-- Create two virtual sensors in Domoticz:
+--    name: "Till elnätet" (To grid)
+--        Sensor Type: Counter
+--        when created, edited to be of Type: Energy Generated (shows as kWh)
+--    name: "Från elnätet" (From grid)
+--        Sensor Type: Counter
+--        when created, edited to be of Type: Energy (shows as kWh)
+--
+-- For each virtual sensor a summation counter is created that is updated
+--   when the daily counter shows a lower value than the last reading.
+--
+local DEBUGPRT = true -- true if debug print to log, else false
+
+return {
+	on = {
+		timer = {"every minute"}
+	},
+	data = {
+        totalProduce = { initial = 0.0 },
+        totalConsume = { initial = 0.0 },
+        lastProduce = { initial = 0.0 },
+        lastConsume = { initial = 0.0 }
+    },
+	execute = function(domoticz, item)
+        if (item.isTimer) then
+            local produce = domoticz.devices("SolarEdge kWh")
+            local consume = domoticz.devices("Elmätare total")
+            local tonet = domoticz.devices("Till elnätet")
+            local fromnet = domoticz.devices("Från elnätet")
+            local produceConsume = produce.counterToday - consume.counterToday
+            local updateProduce = domoticz.data.totalProduce
+            local updateConsume = domoticz.data.totalConsume
+            if (DEBUGPRT == true) then
+                print(string.format("SolarEdge kWh, counterToday: %f kWh", produce.counterToday))
+                print(string.format("Elmätare total, counterToday: %f kWh", consume.counterToday))
+                print(string.format("El till/från nätet, counterToday: %f kWh", produceConsume))
+            end
+            if (0 < produceConsume) then
+                local currentProduce = 0.0 + (produceConsume * 1000)
+                if (currentProduce < domoticz.data.lastProduce) then
+                    domoticz.data.totalProduce = domoticz.data.totalProduce + domoticz.data.lastProduce
+                    updateProduce = domoticz.data.totalProduce
+                    domoticz.data.lastProduce = 0.0
+                else
+                    updateProduce = domoticz.data.totalProduce + currentProduce
+                end
+            else
+                local currentConsume = 0.0 - (produceConsume * 1000)
+                if (currentConsume < domoticz.data.lastConsume) then
+                    domoticz.data.totalConsume = domoticz.data.totalConsume + domoticz.data.lastConsume
+                    updateConsume = domoticz.data.totalConsume
+                    domoticz.data.lastConsume = 0.0
+                else
+                    updateConsume = domoticz.data.totalConsume + currentConsume
+                end
+            end
+            tonet.updateCounter(updateProduce)
+            fromnet.updateCounter(updateConsume)
+            if (DEBUGPRT == true) then
+                print(string.format("El till nätet, updateProduce: %f Wh", updateProduce))
+                print(string.format("El från nätet, updateConsume: %f Wh", updateConsume))
+            end
+        end
+    end
+}
